@@ -1,0 +1,7 @@
+names:
+  0: 0_ok_front
+  1: 1_def_front
+path: C:\Users\User\OneDrive\Documents\Programming\metal_cast_detection\notebooks\model_training\datasets\metal_casting
+test: test
+train: train
+val: val
