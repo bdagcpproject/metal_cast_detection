@@ -5,28 +5,20 @@ REGION=us-central1
 ZONE=us-central1-a
 
 TOPIC_NAME=incoming-image-topic
-BUCKET_NAME=metal_casting_images
+BUCKET_NAME_IMAGE=metal_casting_images
+OBJECT_PREFIX_IMAGE=raw
+BUCKET_NAME_MODEL=metal_casting_model
 
-# Create Pub/Sub topic (and optionally subscription)
+# Create Pub/Sub topic and subscription
 gcloud pubsub topics create ${TOPIC_NAME} --project=${PROJECT_ID}
 gcloud pubsub subscriptions create incoming-image-subscription --topic=${TOPIC_NAME} --project=${PROJECT_ID}
 
 # Create Cloud Storage bucket
-gsutil mb -l ${REGION} gs://${BUCKET_NAME}/
-gcloud storage buckets notifications create gs://${BUCKET_NAME}/ --topic=${TOPIC_NAME} 
+gsutil mb -l ${REGION} gs://${BUCKET_NAME_IMAGE}/
+gsutil mb -l ${REGION} gs://${BUCKET_NAME_MODEL}/
 
-# Create BigQuery dataset (and later, tables should be created as needed)
-# bq --location=${REGION} mk --dataset ${PROJECT_ID}:predictions_dataset
-
-# (Optional) Create BigQuery tables using DDL or via the console.
-# Example: Create table inference_results with columns: image_id (STRING), detections (RECORD), inference_time (TIMESTAMP)
-
-# Create a Dataproc cluster for the inference service
-# gcloud dataproc clusters create inference-cluster \
-#   --region=${REGION} --zone=${ZONE} \
-#   --master-machine-type=n1-standard-2 \
-#   --num-workers=2 \
-#   --project=${PROJECT_ID}
+# Create pub-sub notification based on bucket and object prefix only for image ingestion listener.
+gcloud storage buckets notifications create gs://${BUCKET_NAME_IMAGE}/ --topic=${TOPIC_NAME} --object-prefix=${OBJECT_PREFIX_IMAGE}/
 
 # Create Cloud Scheduler job to trigger the batch ETL pipeline every 15 minutes.
 # Here we simulate a job that publishes a message to a Pub/Sub topic (which you could have a Cloud Function or similar subscribe to)
