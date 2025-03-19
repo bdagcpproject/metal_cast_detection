@@ -1,1 +1,0 @@
-gsutil cp ~/OneDrive/Documents/Programming/metal_cast_detection/notebooks/model_training/datasets/metal_casting/test/0_def_front/cast_def_0_7.jpeg gs://metal_casting_images/raw/cast_def_0_7.jpeg
