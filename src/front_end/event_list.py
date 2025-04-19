@@ -8,13 +8,16 @@ import altair as alt
 from datetime import datetime, timezone, timedelta
 from google.cloud import bigquery
 
+from google.cloud import bigquery
+import google.auth
 
 # ------------------------
 # 🔐 Load credentials
 # ------------------------
-#key_path = "/workspaces/metal_cast_detection/src/front_end/cast-defect-detection-5c0ce479f74d-app.json"
-#credentials = service_account.Credentials.from_service_account_file(key_path)
-bq_client = bigquery.Client(credentials=credentials, project=credentials.project_id)
+
+credentials, project_id = google.auth.default()
+
+bq_client = bigquery.Client(credentials=credentials, project=project_id)
 
 # ------------------------
 # 📥 Fetch BigQuery data
@@ -24,15 +27,13 @@ def fetch_event_data():
     query = """
     SELECT 
       res_id AS `Result ID`, 
+      res_insert_datetime AS `Date`,
       CASE pred_class
         WHEN 'OK' THEN 'Defect Free'
         WHEN 'Defect' THEN 'Fault Detected'
         ELSE 'Inspection Required'
       END AS `Result Label`,
-      pred_class AS `Results`,
-      pred_confidence AS `Confidence Score`,
-      res_image_path AS `image_url`, 
-      res_insert_datetime AS `Date`
+      pred_confidence AS `Confidence Score`
     FROM `cast-defect-detection.cast_defect_detection.inference_results`
     ORDER BY `Date`
     """

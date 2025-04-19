@@ -5,7 +5,7 @@ runtime_config:
   operating_system: "ubuntu22"
   runtime_version: "3.11"
 
-entrypoint: streamlit run app/main.py --server.port $PORT
+entrypoint: streamlit run main.py --server.port $PORT
 
 resources:
   disk_size_gb: 20
