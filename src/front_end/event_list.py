@@ -33,7 +33,8 @@ def fetch_event_data():
         WHEN 'Defect' THEN 'Fault Detected'
         ELSE 'Inspection Required'
       END AS `Result Label`,
-      pred_confidence AS `Confidence Score`
+      pred_confidence AS `Confidence Score`,
+      res_image_path AS `image_url`
     FROM `cast-defect-detection.cast_defect_detection.inference_results`
     ORDER BY `Date`
     """
