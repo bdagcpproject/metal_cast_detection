@@ -45,7 +45,7 @@ def fetch_event_data():
 # ------------------------
 # 🚀 Main UI
 # ------------------------
-st.title("🧱 Cast Defect Detection Dashboard")
+st.title("📊 Cast Defect Detection Dashboard")
 
 df_events = fetch_event_data()
 
