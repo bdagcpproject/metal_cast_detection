@@ -1,22 +1,16 @@
 import streamlit as st
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from google.cloud import bigquery
 from google.oauth2 import service_account
 import altair as alt
-from datetime import datetime, timezone, timedelta
-from google.cloud import bigquery
-
-from google.cloud import bigquery
 import google.auth
 
 # ------------------------
 # 🔐 Load credentials
 # ------------------------
-
 credentials, project_id = google.auth.default()
-
 bq_client = bigquery.Client(credentials=credentials, project=project_id)
 
 # ------------------------
@@ -43,9 +37,55 @@ def fetch_event_data():
     return df
 
 # ------------------------
+# 🧠 Outlier Insights
+# ------------------------
+@st.cache_data(ttl=600)
+def fetch_outlier_insights():
+    query = """
+    WITH base AS (
+      SELECT 
+        res_id,
+        res_insert_datetime,
+        pred_confidence,
+        pred_Speed,
+        pred_class
+      FROM `cast-defect-detection.cast_defect_detection.inference_results`
+    ),
+    defects_per_day AS (
+      SELECT DATE(res_insert_datetime) AS defect_date, COUNT(*) AS defect_count
+      FROM base
+      WHERE pred_class = 'Defect'
+      GROUP BY defect_date
+      ORDER BY defect_count DESC
+      LIMIT 1
+    ),
+    lowest_confidence AS (
+      SELECT res_id, pred_confidence, res_insert_datetime
+      FROM base
+      ORDER BY pred_confidence ASC
+      LIMIT 1
+    ),
+    highest_inference_time AS (
+      SELECT res_id, pred_Speed, res_insert_datetime
+      FROM base
+      ORDER BY pred_Speed DESC
+      LIMIT 1
+    )
+
+    SELECT 
+      (SELECT pred_confidence FROM lowest_confidence) AS lowest_confidence_score,
+      (SELECT res_insert_datetime FROM lowest_confidence) AS lowest_confidence_date,
+      (SELECT pred_Speed FROM highest_inference_time) AS highest_inference_time,
+      (SELECT res_insert_datetime FROM highest_inference_time) AS highest_inference_date,
+      (SELECT defect_date FROM defects_per_day) AS most_defect_day,
+      (SELECT defect_count FROM defects_per_day) AS most_defect_count
+    """
+    return bq_client.query(query).to_dataframe().iloc[0]
+
+# ------------------------
 # 🚀 Main UI
 # ------------------------
-st.title("📊 Cast Defect Detection Dashboard")
+st.title(" 🗒️Cast Defect Detection Dashboard")
 
 df_events = fetch_event_data()
 
@@ -63,15 +103,48 @@ with col2:
 mask = (df_events["Date"].dt.date >= start_date) & (df_events["Date"].dt.date <= end_date)
 filtered_events = df_events[mask].reset_index(drop=True).fillna("")
 
-# 📊 Metrics
+# 📊 Metrics + Outliers
 st.markdown("### 📈 Metrics Overview")
-col1, col2, col3 = st.columns(3)
-with col1:
-    st.metric("Total Inspections", len(filtered_events))
-with col2:
-    st.metric("Defect Free", (filtered_events["Result Label"] == "Defect Free").sum())
-with col3:
-    st.metric("Fault Detected", (filtered_events["Result Label"] == "Fault Detected").sum())
+
+try:
+    insights = fetch_outlier_insights()
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    with col1:
+        st.metric("Total Inspections", len(filtered_events))
+    with col2:
+        st.metric("Defect Free", (filtered_events["Result Label"] == "Defect Free").sum())
+    with col3:
+        st.metric("Fault Detected", (filtered_events["Result Label"] == "Fault Detected").sum())
+    with col4:
+        st.markdown(f"""
+        <div style="padding: 10px; background-color: #fff4f4; border-left: 4px solid #dc3545; border-radius: 4px;">
+            <div style="font-size: 16px; font-weight: bold;">🔻 Lowest Confidence Score</div>
+            <div style="font-size: 20px; color: black;">{insights['lowest_confidence_score']:.2f}</div>
+            <div style="font-size: 13px; color: #dc3545;">on {insights['lowest_confidence_date'].date()}</div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    with col5:
+        st.markdown(f"""
+        <div style="padding: 10px; background-color: #fff4f4; border-left: 4px solid #dc3545; border-radius: 4px;">
+            <div style="font-size: 16px; font-weight: bold;">🔺 Highest Inference Time</div>
+            <div style="font-size: 20px; color: black;">{insights['highest_inference_time']} ms</div>
+            <div style="font-size: 13px; color: #dc3545;">on {insights['highest_inference_date'].date()}</div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    with col6:
+        st.markdown(f"""
+        <div style="padding: 10px; background-color: #fff4f4; border-left: 4px solid #dc3545; border-radius: 4px;">
+            <div style="font-size: 16px; font-weight: bold;">🔥 Most Defects (1 Day)</div>
+            <div style="font-size: 20px; color: black;">{insights['most_defect_count']} defects</div>
+            <div style="font-size: 13px; color: #dc3545;">on {insights['most_defect_day']}</div>
+        </div>
+    """, unsafe_allow_html=True)
+
+except Exception as e:
+    st.error("⚠️ Failed to load outlier insights.")
+    st.text(str(e))
 
 # 📈 Trend Chart
 st.subheader("📊 Trend Over Time")
@@ -91,7 +164,7 @@ chart = alt.Chart(chart_data).mark_line(point=True).encode(
 st.altair_chart(chart, use_container_width=True)
 
 # 📝 Event Table
-st.markdown("### 📝 Event List")
+st.markdown("### 📝 Prediction Results List")
 with st.container():
     gb = GridOptionsBuilder.from_dataframe(filtered_events)
     gb.configure_selection('single', use_checkbox=True)
@@ -107,41 +180,65 @@ with st.container():
         update_mode=GridUpdateMode.SELECTION_CHANGED,
     )
 
-# 🖼️ Image Preview + 💬 Comment
+# 🖼️ Image Preview + 💬 Comments
 selected_rows = grid_response.get("selected_rows", [])
 
-# Ensure it's a list of dicts
 if isinstance(selected_rows, pd.DataFrame):
     selected_rows = selected_rows.to_dict(orient="records")
 
 if isinstance(selected_rows, list) and len(selected_rows) > 0:
     selected = selected_rows[0]
     image_url = selected.get("image_url", "")
-
-    # 🔧 Convert relative GCS path to public URL if needed
     if image_url and not image_url.startswith("http"):
         image_url = f"https://storage.googleapis.com/metal_casting_images/{image_url.lstrip('/')}"
 
     st.markdown("### 🖼️ Selected Image")
     if image_url:
         st.image(image_url, caption=f"Result ID: {selected['Result ID']}", width=400)
-        
     else:
         st.warning("⚠️ No image URL found for this record.")
 
-    # 💬 Comment box
+    # 💬 Existing Comments
+    st.markdown("### 💬 Existing Comments")
+    try:
+        comments_query = """
+        SELECT comment_text, comment_datetime
+        FROM `cast-defect-detection.cast_defect_detection.comments`
+        WHERE result_id = @result_id
+        ORDER BY comment_datetime DESC
+        """
+        comment_job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("result_id", "STRING", selected["Result ID"])
+            ]
+        )
+        comments_df = bq_client.query(comments_query, job_config=comment_job_config).to_dataframe()
+
+        if not comments_df.empty:
+            for _, row in comments_df.iterrows():
+                st.markdown(f"""
+                    <div style="padding: 8px 12px; border-left: 4px solid #007BFF; margin-bottom: 10px; background-color: #f9f9f9;">
+                        <strong>{row['comment_datetime'].strftime('%Y-%m-%d %H:%M:%S')}</strong><br>
+                        {row['comment_text']}
+                    </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.info("No comments yet for this result.")
+    except Exception as e:
+        st.error("Failed to load comments.")
+        st.text(str(e))
+
+    # 💬 Comment Submission
     st.markdown("### 💬 Add a Comment")
     comment = st.text_area("Your comment:", key="comment_box")
-    # Create a timezone for Singapore Time (SGT, UTC+8)
     sgt_timezone = timezone(timedelta(hours=8))
     if st.button("Submit Comment"):
         if comment.strip() == "":
             st.warning("Please enter a comment before submitting.")
         else:
             try:
-               # Use Singapore Time (SGT) for the timestamp
-                timestamp = datetime.now(sgt_timezone)  # Get a timezone-aware datetime object in SGT
-                comment_query = f"""
+                timestamp = datetime.now(sgt_timezone)
+                comment_query = """
                 INSERT INTO `cast-defect-detection.cast_defect_detection.comments` 
                 (result_id, comment_text, comment_datetime)
                 VALUES (@result_id, @comment, @created_at)
@@ -153,15 +250,8 @@ if isinstance(selected_rows, list) and len(selected_rows) > 0:
                         bigquery.ScalarQueryParameter("created_at", "TIMESTAMP", timestamp),
                     ]
                 )
-
-                # Execute the query
-                query_job = bq_client.query(comment_query, job_config=job_config)
-                query_job.result()  # Wait for the query to finish
-
+                bq_client.query(comment_query, job_config=job_config).result()
                 st.success("✅ Comment submitted successfully!")
-
             except Exception as e:
                 st.error(f"❌ Error submitting comment: {e}")
-                st.text("Detailed Error Message: ")
-                st.text(str(e))  # Log the error message to help debug
-  
+                st.text(str(e))
