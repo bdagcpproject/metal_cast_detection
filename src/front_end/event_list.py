@@ -8,13 +8,13 @@ import altair as alt
 import google.auth
 
 # ------------------------
-# 🔐 Load credentials
+#  Load credentials
 # ------------------------
 credentials, project_id = google.auth.default()
 bq_client = bigquery.Client(credentials=credentials, project=project_id)
 
 # ------------------------
-# 📥 Fetch BigQuery data
+#  Fetch BigQuery data
 # ------------------------
 @st.cache_data(ttl=600)
 def fetch_event_data():
@@ -37,7 +37,7 @@ def fetch_event_data():
     return df
 
 # ------------------------
-# 🧠 Outlier Insights
+#  Outlier Insights
 # ------------------------
 @st.cache_data(ttl=600)
 def fetch_outlier_insights():
@@ -89,8 +89,8 @@ st.title(" 🗒️Cast Defect Detection Dashboard")
 
 df_events = fetch_event_data()
 
-# 🗓️ Date filtering
-st.subheader("📅 Filter Events by Date")
+#  Date filtering
+st.subheader(" Filter Events by Date")
 col1, col2 = st.columns(2)
 min_date = df_events["Date"].min().date()
 max_date = df_events["Date"].max().date()
@@ -103,8 +103,8 @@ with col2:
 mask = (df_events["Date"].dt.date >= start_date) & (df_events["Date"].dt.date <= end_date)
 filtered_events = df_events[mask].reset_index(drop=True).fillna("")
 
-# 📊 Metrics + Outliers
-st.markdown("### 📈 Metrics Overview")
+#  Metrics + Outliers
+st.markdown("###  Metrics Overview")
 
 try:
     insights = fetch_outlier_insights()
@@ -146,8 +146,8 @@ except Exception as e:
     st.error("⚠️ Failed to load outlier insights.")
     st.text(str(e))
 
-# 📈 Trend Chart
-st.subheader("📊 Trend Over Time")
+#  Trend Chart
+st.subheader(" Trend Over Time")
 chart_data = (
     filtered_events.groupby([filtered_events["Date"].dt.date, "Result Label"])
     .size()
@@ -163,8 +163,8 @@ chart = alt.Chart(chart_data).mark_line(point=True).encode(
 
 st.altair_chart(chart, use_container_width=True)
 
-# 📝 Event Table
-st.markdown("### 📝 Prediction Results List")
+
+st.markdown("###  Prediction Results List")
 with st.container():
     gb = GridOptionsBuilder.from_dataframe(filtered_events)
     gb.configure_selection('single', use_checkbox=True)
@@ -180,7 +180,7 @@ with st.container():
         update_mode=GridUpdateMode.SELECTION_CHANGED,
     )
 
-# 🖼️ Image Preview + 💬 Comments
+# 💬 Image Preview + Comments
 selected_rows = grid_response.get("selected_rows", [])
 
 if isinstance(selected_rows, pd.DataFrame):
@@ -188,13 +188,15 @@ if isinstance(selected_rows, pd.DataFrame):
 
 if isinstance(selected_rows, list) and len(selected_rows) > 0:
     selected = selected_rows[0]
+    result_id = selected["Result ID"]
+
     image_url = selected.get("image_url", "")
     if image_url and not image_url.startswith("http"):
         image_url = f"https://storage.googleapis.com/metal_casting_images/{image_url.lstrip('/')}"
 
     st.markdown("### 🖼️ Selected Image")
     if image_url:
-        st.image(image_url, caption=f"Result ID: {selected['Result ID']}", width=400)
+        st.image(image_url, caption=f"Result ID: {result_id}", width=400)
     else:
         st.warning("⚠️ No image URL found for this record.")
 
@@ -207,13 +209,12 @@ if isinstance(selected_rows, list) and len(selected_rows) > 0:
         WHERE result_id = @result_id
         ORDER BY comment_datetime DESC
         """
-        comment_job_config = bigquery.QueryJobConfig(
+        job_config = bigquery.QueryJobConfig(
             query_parameters=[
-                bigquery.ScalarQueryParameter("result_id", "STRING", selected["Result ID"])
+                bigquery.ScalarQueryParameter("result_id", "STRING", result_id)
             ]
         )
-        comments_df = bq_client.query(comments_query, job_config=comment_job_config).to_dataframe()
-
+        comments_df = bq_client.query(comments_query, job_config=job_config).to_dataframe()
         if not comments_df.empty:
             for _, row in comments_df.iterrows():
                 st.markdown(f"""
@@ -228,30 +229,51 @@ if isinstance(selected_rows, list) and len(selected_rows) > 0:
         st.error("Failed to load comments.")
         st.text(str(e))
 
-    # 💬 Comment Submission
+    # 💬 Reset comment if new selection
+  # Detect new selection and trigger comment box reset
+    if "last_selected_id" not in st.session_state:
+        st.session_state["last_selected_id"] = None
+
+    if st.session_state["last_selected_id"] != selected["Result ID"]:
+        st.session_state["last_selected_id"] = selected["Result ID"]
+        st.session_state["reset_comment_flag"] = True
+        st.rerun()
+
+
+        # 💬 Render comment box with reset support
+    if st.session_state.get("reset_comment_flag"):
+        st.session_state["comment_box"] = ""
+        st.session_state["reset_comment_flag"] = False
+
     st.markdown("### 💬 Add a Comment")
-    comment = st.text_area("Your comment:", key="comment_box")
-    sgt_timezone = timezone(timedelta(hours=8))
+    comment = st.text_area("Your comment:", key="comment_box", height=100)
+
+    # Submit comment
     if st.button("Submit Comment"):
-        if comment.strip() == "":
+        if not comment.strip():
             st.warning("Please enter a comment before submitting.")
         else:
             try:
-                timestamp = datetime.now(sgt_timezone)
-                comment_query = """
-                INSERT INTO `cast-defect-detection.cast_defect_detection.comments` 
+                timestamp = datetime.now(timezone(timedelta(hours=8)))
+                insert_query = """
+                INSERT INTO `cast-defect-detection.cast_defect_detection.comments`
                 (result_id, comment_text, comment_datetime)
                 VALUES (@result_id, @comment, @created_at)
                 """
-                job_config = bigquery.QueryJobConfig(
+                insert_job = bigquery.QueryJobConfig(
                     query_parameters=[
                         bigquery.ScalarQueryParameter("result_id", "STRING", selected["Result ID"]),
                         bigquery.ScalarQueryParameter("comment", "STRING", comment),
                         bigquery.ScalarQueryParameter("created_at", "TIMESTAMP", timestamp),
                     ]
                 )
-                bq_client.query(comment_query, job_config=job_config).result()
+                bq_client.query(insert_query, job_config=insert_job).result()
                 st.success("✅ Comment submitted successfully!")
+
+                # 🧼 Trigger reset on next run
+                st.session_state["reset_comment_flag"] = True
+                st.rerun()
+
             except Exception as e:
                 st.error(f"❌ Error submitting comment: {e}")
                 st.text(str(e))
