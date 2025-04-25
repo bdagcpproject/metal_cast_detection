@@ -1,4 +1,6 @@
-#Incoming image listener
+#!/bin/bash
+# This script sets up the Google Cloud Function for the inference listener.
+
 gcloud functions deploy inference_listener-2 \
     --gen2 \
     --region=us-central1 \
@@ -6,4 +8,6 @@ gcloud functions deploy inference_listener-2 \
     --source=. \
     --entry-point=subscribe \
     --trigger-topic=incoming-image-topic \
-    --memory=2Gi
+    --clear-max-instances \
+    --cpu=2 \
+    --memory=8Gi
