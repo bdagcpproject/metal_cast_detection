@@ -42,8 +42,8 @@ def aggregate_monthly(df: pd.DataFrame) -> pd.DataFrame:
         "inference_time_med": "median",
         "inference_time_mean": "mean",
         "inference_time_max": "max",
-        "pred_class_pass_freq": "sum",
-        "pred_class_fail_freq": "sum"
+        "OK": "sum",
+        "Defect": "sum"
     }
     grouped = df.groupby("month").agg({k: v for k, v in agg_funcs.items() if k in df.columns}).reset_index()
     grouped["aggregation_start"] = grouped["month"]
@@ -71,47 +71,222 @@ with tab1:
 
     if agg_type == "Monthly":
         df = aggregate_monthly(df)
-
-    st.subheader(f"{agg_type} Median & Max Confidence Score Trend")
-    fig1 = px.line(df, x="aggregation_start", y=[ "confidence_score_med", "confidence_score_mean"],
-                   hover_name="aggregation_label", labels={"aggregation_start": agg_type, "value": "Confidence"})
-    st.plotly_chart(fig1, use_container_width=True)
-
-    st.subheader("Min-Max Confidence Range")
-
-    fig_band = go.Figure()
-
-    # Min Confidence Line
-    fig_band.add_trace(go.Scatter(
-        x=df["aggregation_start"],
-        y=df["confidence_score_min"],
-        mode="lines",
-        name="Min Confidence",
-        line=dict(color='orange')
-    ))
-
-    # Max Confidence Line
-    fig_band.add_trace(go.Scatter(
-        x=df["aggregation_start"],
-        y=df["confidence_score_max"],
-        mode="lines",
-        name="Max Confidence",
-        line=dict(color='green')
-    ))
-
-    fig_band.update_layout(
-        xaxis_title=agg_type,
-        yaxis_title="Confidence",
-        showlegend=True
+        
+    ## --- Plot 1: Confidence Score Trend ---
+    st.subheader(f"{agg_type} Prediction Confidence Score Trend")
+    
+    fig1 = px.line(
+        df,
+        x="aggregation_start",
+        y=["confidence_score_med", "confidence_score_mean"],
+        labels={
+            "aggregation_start": agg_type,  # X-axis label
+            "value": "Confidence Score",   # Y-axis label
+            "variable": "Statistics" # Legend title
+        },
+        markers=True,  
+        symbol_sequence=['square'],
+        color_discrete_sequence=["#0080FF", "#00FFFF"] 
     )
 
-    st.plotly_chart(fig_band, use_container_width=True)
+    # Add threshold line as a proper trace (enables hover)
+    fig1.add_trace(
+        go.Scatter(
+            x=df["aggregation_start"],
+            y=[0.99]*len(df),
+            mode='lines',
+            line=dict(color='red', width=2, dash='dot'),
+            name='Target',
+        )
+    )
 
-    st.subheader("Mean Confidence Score Distribution")
-    df["binned_confidence"] = pd.cut(df["confidence_score_mean"], bins=10).astype(str)
-    hist_df = df.groupby("binned_confidence").size().reset_index(name="count")
-    fig_hist = px.bar(hist_df, x="binned_confidence", y="count", labels={"binned_confidence": "Confidence Range", "count": "Count"})
-    st.plotly_chart(fig_hist, use_container_width=True)
+    # Update x-axis format for monthly view
+    if agg_type == "Monthly":
+        fig1.update_xaxes(
+            tickformat="%Y-%m",  # Show as "2025-03" format
+            dtick="M1"           # One tick per month
+        )
+    else:  # Weekly
+        # Only show labels where data exists
+        fig1.update_xaxes(
+            tickformat="%Y-%m-%d",
+            tickvals=df["aggregation_start"],  # Only show ticks where data exists
+        )
+
+    # Custom hover template 
+    fig1.update_traces(
+        hovertemplate=(
+            "<b>%{customdata[0]}</b><br>" +  # aggregation_label as title
+            "<b>%{fullData.name}</b>: %{y:.4f}<extra></extra>"  # Trace name and value
+        ),
+        customdata=df[['aggregation_label']]  # Pass the labels as customdata
+    )
+
+    # Rename legend entries and customize markers
+    fig1.for_each_trace(lambda t: t.update(
+        name="Median" if "med" in t.name else "Mean",
+        marker=dict(
+            size=8,  # Adjust symbol size
+            line=dict(width=1, color='DarkSlateGrey')  # Add border to symbols
+        )
+    ) if t.name != 'Target' else None)
+
+    # Additional styling
+    fig1.update_layout(
+        hovermode="x unified"
+    )
+    st.plotly_chart(fig1, use_container_width=True)
+
+    ## --- Plot 2: Confidence Score Range (Max-Min) ---
+
+    df_fig2 = df.copy()
+    df_fig2["confidence_score_delta"] = df_fig2["confidence_score_max"] - df_fig2["confidence_score_min"]
+    st.subheader("Confidence Score Range (Max-Min)")
+
+    fig2 = px.line(
+        df_fig2,
+        x="aggregation_start",
+        y=["confidence_score_min", "confidence_score_max", "confidence_score_delta"],
+        labels={
+            "aggregation_start": agg_type,  # X-axis label
+            "value": "Confidence Score",   # Y-axis label
+            "variable": "Statistics" # Legend title
+        },
+        markers=True,  
+        symbol_sequence=['square'],
+        color_discrete_sequence=["#FFFF33", "#00FF00", "#FF8000"] 
+    )
+
+    # Add threshold line as a proper trace (enables hover)
+    fig2.add_trace(
+        go.Scatter(
+            x=df_fig2["aggregation_start"],
+            y=[0.3]*len(df_fig2),
+            mode='lines',
+            line=dict(color='red', width=2, dash='dot'),
+            name='Target',
+        )
+    )
+
+    # Update x-axis format for monthly view
+    if agg_type == "Monthly":
+        fig2.update_xaxes(
+            tickformat="%Y-%m",  # Show as "2025-03" format
+            dtick="M1"           # One tick per month
+        )
+    else:  # Weekly
+        # Only show labels where data exists
+        fig2.update_xaxes(
+            tickformat="%Y-%m-%d",
+            tickvals=df_fig2["aggregation_start"],  # Only show ticks where data exists
+        )
+
+    # Custom hover template 
+    fig2.update_traces(
+        hovertemplate=(
+            "<b>%{customdata[0]}</b><br>" +  # aggregation_label as title
+            "<b>%{fullData.name}</b>: %{y:.4f}<extra></extra>"  # Trace name and value
+        ),
+        customdata=df_fig2[['aggregation_label']]  # Pass the labels as customdata
+    )
+
+    # Rename legend entries and customize markers
+    fig2.for_each_trace(lambda t: t.update(
+        name="Min" if "min" in t.name else "Max" if "max" in t.name else "Delta",
+        marker=dict(
+            size=8,  # Adjust symbol size
+            line=dict(width=1, color='DarkSlateGrey')  # Add border to symbols
+        ),
+        visible="legendonly" if "min" in t.name or "max" in t.name else True
+    ) if t.name != 'Target' else None)
+
+    # Additional styling
+    fig2.update_layout(
+        hovermode="x unified"
+    )
+    st.plotly_chart(fig2, use_container_width=True)
+
+    ## --- Plot 3: Histogram of confidence score distribution ---
+
+    st.subheader("Confidence Score Distribution (Min, Max, Mean)")
+    df_fig3 = df.copy()
+
+    bin_edges = [0, 0.2, 0.4, 0.6, 0.8, 1.0]
+    bin_labels = ["Very Low (0-0.2)", "Low (0.2-0.4)", "Medium (0.4-0.6)", "High (0.6-0.8)", "Very High (0.8-1.0)"]
+    metrics = ['Min', 'Max', 'Mean']
+
+    # Bin all metrics
+    for name in metrics:
+        col = f'confidence_score_{name.lower()}'
+        df_fig3[name] = pd.cut(
+            df_fig3[col],  
+            bins=bin_edges,
+            labels=bin_labels,
+        )
+
+    # Melt and group
+    melted_df = pd.melt(
+        df_fig3,
+        id_vars=[],
+        value_vars=[f"{name}" for name in metrics],
+        var_name='metric',
+        value_name='binned_confidence'
+    )   
+
+    # Group and count
+    hist_df = melted_df.groupby(['binned_confidence', 'metric'], observed=True)\
+                    .size()\
+                    .reset_index(name='count')
+
+    # Create complete combination of all bins and metrics
+    complete_combinations = pd.MultiIndex.from_product(
+        [bin_labels, metrics],
+        names=['binned_confidence', 'metric']
+    ).to_frame(index=False)
+
+    # Merge with complete combinations to fill missing values
+    hist_merge_df = pd.merge(
+        complete_combinations,
+        hist_df,
+        on=['binned_confidence', 'metric'],
+        how='left'
+    ).fillna(0)
+    
+    # Create ordered categorical
+    hist_merge_df['binned_confidence'] = pd.Categorical(
+        hist_merge_df['binned_confidence'],
+        categories=bin_labels,
+        ordered=True
+    )
+        
+    fig3 = px.bar(
+        hist_merge_df,
+        x="binned_confidence",
+        y="count",
+        color="metric",
+        barmode="group",
+        category_orders={"binned_confidence": bin_labels},
+        labels={
+            "binned_confidence": "Confidence Score Range",
+            "count": "Count",
+            "metric": "Metric Type"
+        },
+        color_discrete_sequence=['#1f77b4', '#ff7f0e', '#2ca02c']  # Blue, Orange, Green
+    )
+
+    # Custom hover template 
+    fig3.update_traces(
+        hovertemplate=(
+            "<b>%{fullData.name}</b>: %{y:.d}<extra></extra>"  # Trace name and value
+        ),
+        customdata=hist_df[['metric']]  # Pass the labels as customdata
+    )
+
+    # Improve layout
+    fig3.update_layout(
+        hovermode="x unified"
+    )
+    st.plotly_chart(fig3, use_container_width=True)
 
 # --- Tab 2: Inference Time ---
 with tab2:
