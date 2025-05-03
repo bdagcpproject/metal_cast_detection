@@ -14,7 +14,7 @@ bq_client = bigquery.Client(credentials=credentials, project=project_id)
 
 # --- Sidebar filters ---
 st.sidebar.header("Filter Options")
-start_date = st.sidebar.date_input("Start Date", datetime(2024, 1, 1))
+start_date = st.sidebar.date_input("Start Date", datetime(2025, 2, 1))
 end_date = st.sidebar.date_input("End Date", datetime.today())
 agg_type = st.sidebar.radio("Aggregation Level", ["Weekly", "Monthly"])
 
