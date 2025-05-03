@@ -90,15 +90,13 @@ st.title(" 🗒️Cast Defect Detection Dashboard")
 df_events = fetch_event_data()
 
 #  Date filtering
-st.subheader(" Filter Events by Date")
-col1, col2 = st.columns(2)
+st.sidebar.subheader("📅 Filter by Date")
 min_date = df_events["Date"].min().date()
 max_date = df_events["Date"].max().date()
 
-with col1:
-    start_date = st.date_input("Start Date", min_value=min_date, max_value=max_date, value=min_date)
-with col2:
-    end_date = st.date_input("End Date", min_value=min_date, max_value=max_date, value=max_date)
+start_date = st.sidebar.date_input("Start Date", min_value=min_date, max_value=max_date, value=min_date)
+end_date = st.sidebar.date_input("End Date", min_value=min_date, max_value=max_date, value=max_date)
+
 
 mask = (df_events["Date"].dt.date >= start_date) & (df_events["Date"].dt.date <= end_date)
 filtered_events = df_events[mask].reset_index(drop=True).fillna("")
