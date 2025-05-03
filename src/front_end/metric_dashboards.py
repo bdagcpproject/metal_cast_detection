@@ -52,7 +52,7 @@ def aggregate_monthly(df: pd.DataFrame) -> pd.DataFrame:
     return grouped.drop(columns=["month"])
 
 # --- Tabs ---
-tab1, tab2, tab3 = st.tabs(["Confidence Scores", "Inference Time", "Prediction Classes"])
+tab1, tab2, tab3 = st.tabs(["Confidence Scores", "Inference Time", "Prediction Class"])
 
 # --- Tab 1: Confidence Scores ---
 with tab1:
@@ -478,31 +478,150 @@ with tab3:
     FROM `cast-defect-detection.cast_defect_detection.prediction_class_metrics`
     ORDER BY aggregation_start
     """
-    df = fetch_bq_data(query)
+    df3 = fetch_bq_data(query)
 
     if agg_type == "Monthly":
-        df = aggregate_monthly(df)
+        df3 = aggregate_monthly(df3)
 
-    st.subheader("Pass vs Fail Frequency (Stacked Bar)")
-    df_melted = df.melt(
+    ## --- Plot 1: Prediction Class Trend ---
+    st.subheader("Prediction Result Trend")
+
+    df3["fail_rate"] = df3["Defect"] / (df3["OK"] + df3["Defect"])* 100
+
+    df3_melted = df3.melt(
         id_vars=["aggregation_start", "aggregation_label"],
         value_vars=["OK", "Defect"],
         var_name="Result Type",
         value_name="Count"
     )
-    fig_bar = px.bar(df_melted, x="aggregation_start", y="Count", color="Result Type",
-                     barmode="stack", hover_name="aggregation_label",
-                     labels={"aggregation_start": agg_type})
-    st.plotly_chart(fig_bar, use_container_width=True)
+    
+    fig7 = px.bar(
+        df3_melted,
+        x="aggregation_start",
+        y="Count",
+        color="Result Type",
+        barmode="stack",
+        labels={
+            "aggregation_start": agg_type,  # X-axis label
+        },
+        color_discrete_sequence=["#0080FF", "#00FFFF"]
+    )
 
-    st.subheader("Failure Rate Over Time")
-    df["fail_rate"] = df["Defect"] / (df["OK"] + df["Defect"])* 100
-    fig_line = px.line(df, x="aggregation_start", y="fail_rate",
-                       labels={"aggregation_start": agg_type, "fail_rate": "Fail Rate"})
-    st.plotly_chart(fig_line, use_container_width=True)
+    # Add fail rate line (using secondary y-axis)
+    fig7.add_trace(
+        go.Scatter(
+            x=df3["aggregation_start"],
+            y=df3["fail_rate"],
+            name="Fail Rate (%)",
+            mode="lines+markers",
+            line=dict(color="#0000FF", width=2), 
+            marker=dict(symbol="x", size=6),
+            yaxis="y2"  # Secondary axis
+        )
+    )
 
-    st.subheader("Pass vs Fail Distribution")
-    total = df[["OK", "Defect"]].sum().reset_index()
+    # Create secondary y-axis for fail rate
+    fig7.update_layout(
+        yaxis2=dict(
+            title="Fail Rate (%)",
+            overlaying="y",
+            side="right",
+            range=[0, 100],  # 0-100% scale
+            showgrid=False  # Avoid clutter with primary grid
+        ),
+        legend=dict(
+            orientation="v",  # Vertical orientation
+            yanchor="top",    # Anchor at top of legend
+            xanchor="right",  # Anchor at right side
+            x=1.17,           # Position outside plot area
+        ),
+    )
+    
+    # Update x-axis format for monthly view
+    if agg_type == "Monthly":
+        fig7.update_xaxes(
+            tickformat="%Y-%m",  # Show as "2025-03" format
+            dtick="M1"           # One tick per month
+        )
+    else:  # Weekly
+        # Only show labels where data exists
+        fig7.update_xaxes(
+            tickformat="%Y-%m-%d",
+            tickvals=df3_melted["aggregation_start"],  # Only show ticks where data exists
+        )
+
+    # Custom hover template 
+    fig7.update_traces(
+        hovertemplate=(
+            "<b>%{customdata[0]}</b><br>" +  # aggregation_label as title
+            "<b>%{fullData.name}</b>: %{y:.d}<extra></extra>"  # Trace name and value
+        ),
+        customdata=df3_melted[['aggregation_label']]  # Pass the labels as customdata
+    )
+    
+    # Special hover template for fail rate line
+    fig7.data[-1].hovertemplate = (
+        "<b>%{customdata[0]}</b><br>" +  
+        "<b>Fail Rate</b>: %{y:.1f}%<extra></extra>"
+    )
+
+    # Improve layout
+    fig7.update_layout(
+        hovermode="x unified"
+    )
+
+    st.plotly_chart(fig7, use_container_width=True)
+
+    ## --- Plot 2: Prediction Class Distribution ---
+    st.subheader("Prediction Result Distribution")
+
+    # Calculate totals and percentages
+    total = df3[["OK", "Defect"]].sum().reset_index()
     total.columns = ["Class", "Total"]
-    fig_pie = px.pie(total, names="Class", values="Total", title="Total Class Distribution")
-    st.plotly_chart(fig_pie, use_container_width=True)
+    total['Percentage'] = (total['Total'] / total['Total'].sum() * 100).round(1)
+    total['Label'] = total.apply(lambda x: f"{x['Class']}: {x['Total']:,} ({x['Percentage']}%)", axis=1)
+
+    # Create enhanced pie chart
+    fig8 = px.pie(
+        total,
+        names="Class",
+        values="Total",
+        color="Class",
+        color_discrete_sequence=["#4CAF50", "#F44336"],  # Green for OK, Red for Defect
+        hover_name="Label",  # Show complete info on hover
+        hole=0.3,  # Create a donut chart
+        width=600,
+        height=500
+    )
+
+    # Enhance layout and styling
+    fig8.update_traces(
+        textfont_size=16,  # Increased from default size
+        textfont_color="white",
+        marker=dict(
+            line=dict(color='#FFFFFF', width=1)  # White borders between segments
+        ),
+        pull=[0, 0.05],  # Slightly pull out the Defect slice
+        hovertemplate="<b>%{hovertext}</b><extra></extra>"
+    )
+
+    # Improve legend
+    fig8.update_layout(
+        legend=dict(
+            orientation="v",
+            yanchor="top",    # Anchor at top of legend
+            xanchor="right",  # Anchor at right side
+            title_text='Result Type',
+        ),
+        annotations=[
+            dict(
+                text=f"Total: {total['Total'].sum():,}",
+                x=0.5,
+                y=0.5,
+                font_size=16,
+                showarrow=False
+            )
+        ]
+    )
+
+    st.plotly_chart(fig8, use_container_width=True)
