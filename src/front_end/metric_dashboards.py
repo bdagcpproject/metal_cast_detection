@@ -19,14 +19,11 @@ end_date = st.sidebar.date_input("End Date", datetime.today())
 agg_type = st.sidebar.radio("Aggregation Level", ["Weekly", "Monthly"])
 
 # --- Helper: Fetch BigQuery Data ---
+@st.cache_data(ttl=3600)  # Cache for 1 hour
 def fetch_bq_data(query: str) -> pd.DataFrame:
     df = bq_client.query(query).to_dataframe()
     df["aggregation_start"] = pd.to_datetime(df["aggregation_start"])
     df["aggregation_end"] = pd.to_datetime(df["aggregation_end"])
-
-    df = df[(df["aggregation_start"].dt.date >= start_date) &
-            (df["aggregation_start"].dt.date <= end_date)]
-
     df["aggregation_label"] = df["aggregation_start"].dt.strftime('%Y-%m-%d') + " → " + df["aggregation_end"].dt.strftime('%Y-%m-%d')
     return df
 
@@ -56,7 +53,7 @@ tab1, tab2, tab3 = st.tabs(["Confidence Scores", "Inference Time", "Prediction C
 
 # --- Tab 1: Confidence Scores ---
 with tab1:
-    query = """
+    query = f"""
     SELECT 
         aggregation_start,
         aggregation_end,
@@ -65,6 +62,7 @@ with tab1:
         confidence_score_mean, 
         confidence_score_max
     FROM `cast-defect-detection.cast_defect_detection.confidencescore_metrics`
+    WHERE aggregation_start >= '{start_date}' AND aggregation_start <= '{end_date}'
     ORDER BY aggregation_start
     """
     df = fetch_bq_data(query)
@@ -295,7 +293,7 @@ with tab1:
 
 # --- Tab 2: Inference Time ---
 with tab2:
-    query = """
+    query = f"""
     SELECT 
         aggregation_start,
         aggregation_end,
@@ -304,6 +302,7 @@ with tab2:
         inference_time_mean, 
         inference_time_max
     FROM `cast-defect-detection.cast_defect_detection.inference_metrics`
+    WHERE aggregation_start >= '{start_date}' AND aggregation_start <= '{end_date}'
     ORDER BY aggregation_start
     """
     df2 = fetch_bq_data(query)
@@ -469,13 +468,14 @@ with tab2:
 
 # --- Tab 3: Prediction Classes ---
 with tab3:
-    query = """
+    query = f"""
     SELECT 
         aggregation_start,
         aggregation_end,
         pred_class_pass_freq AS OK, 
         pred_class_fail_freq AS Defect
     FROM `cast-defect-detection.cast_defect_detection.prediction_class_metrics`
+    WHERE aggregation_start >= '{start_date}' AND aggregation_start <= '{end_date}'
     ORDER BY aggregation_start
     """
     df3 = fetch_bq_data(query)
