@@ -30,22 +30,26 @@ schema = [
     bigquery.SchemaField("pred_class", "STRING"),
     bigquery.SchemaField("pred_confidence", "FLOAT"),
     bigquery.SchemaField("pred_speed", "FLOAT"),
-    bigquery.SchemaField("res_insert_datetime", "DATETIME"),
+    bigquery.SchemaField("res_insert_datetime", "DATETIME")
 ]
 
-# Create table object with schema
-table = bigquery.Table(table_id, schema=schema)
+# Check if table exists
+try:
+    client.get_table(table_id)
+    print(f"Table {table_id} already exists in dataset {dataset_id}.")
+except Exception:
+    # Create table if it doesn't exist
+    table = bigquery.Table(table_id, schema=schema)
 
-# Add partitioning on `res_insert_datetime` (without expiration)
-table.time_partitioning = bigquery.TimePartitioning(
-    type_=bigquery.TimePartitioningType.DAY,
-    field="res_insert_datetime"  # Partitioning column
-)
+    # Add partitioning on `res_insert_datetime` (without expiration)
+    table.time_partitioning = bigquery.TimePartitioning(
+        type_=bigquery.TimePartitioningType.DAY,
+        field="res_insert_datetime"  # Partitioning column
+    )
 
-# Create table
-table = client.create_table(table)
+    table = client.create_table(table)
 
-print(
-    f"Created table {table.project}.{table.dataset_id}.{table.table_id}, "
-    f"partitioned on column {table.time_partitioning.field}."
-)
+    print(
+        f"Created table {table.project}.{table.dataset_id}.{table.table_id}, "
+        f"partitioned on column {table.time_partitioning.field}."
+    )
