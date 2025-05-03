@@ -229,22 +229,6 @@ if isinstance(selected_rows, list) and len(selected_rows) > 0:
         st.error("Failed to load comments.")
         st.text(str(e))
 
-    # 💬 Reset comment if new selection
-  # Detect new selection and trigger comment box reset
-    if "last_selected_id" not in st.session_state:
-        st.session_state["last_selected_id"] = None
-
-    if st.session_state["last_selected_id"] != selected["Result ID"]:
-        st.session_state["last_selected_id"] = selected["Result ID"]
-        st.session_state["reset_comment_flag"] = True
-        st.rerun()
-
-
-        # 💬 Render comment box with reset support
-    if st.session_state.get("reset_comment_flag"):
-        st.session_state["comment_box"] = ""
-        st.session_state["reset_comment_flag"] = False
-
     st.markdown("### 💬 Add a Comment")
     comment = st.text_area("Your comment:", key="comment_box", height=100)
 
@@ -269,11 +253,6 @@ if isinstance(selected_rows, list) and len(selected_rows) > 0:
                 )
                 bq_client.query(insert_query, job_config=insert_job).result()
                 st.success("✅ Comment submitted successfully!")
-
-                # 🧼 Trigger reset on next run
-                st.session_state["reset_comment_flag"] = True
-                st.rerun()
-
             except Exception as e:
                 st.error(f"❌ Error submitting comment: {e}")
                 st.text(str(e))
