@@ -1,37 +1,36 @@
 #!/bin/bash
 
-# Check if an argument is provided
-if [ -z "$1" ]; then
-    echo "Usage: $0 <interval_in_seconds>"
+# Check arguments
+if [ $# -lt 2 ]; then
+    echo "Usage: $0 <interval_in_seconds> <number_of_images>"
     exit 1
 fi
 
-# Read the input interval (in seconds)
 INTERVAL=$1
-
-# Define source directory
+NUM_IMAGES=$2
 SRC_DIR=~/OneDrive/Documents/Programming/metal_cast_detection/notebooks/model_training/datasets/metal_casting_2/test/
+GCS_BUCKET="gs://metal_casting_images/raw/"
 
 while true; do
-    # Find all JPEG files, pick one randomly
-    SELECTED_FILE=$(find "$SRC_DIR" -type f -name "*.jpeg" | shuf -n 1)
+    # Improved file selection with proper null-terminated handling
+    mapfile -d '' -t SELECTED_FILES < <(
+        find "$SRC_DIR" -type f -name "*.jpeg" -print0 |
+        shuf -z -n "$NUM_IMAGES"
+    )
 
-    # Check if a file was found
-    if [[ -n "$SELECTED_FILE" ]]; then
-        # Extract just the filename
-        FILE_NAME=$(basename "$SELECTED_FILE")
-
-        # Define destination in GCS
-        GCS_BUCKET="gs://metal_casting_images/raw/$FILE_NAME"
-
-        # Upload to GCS
-        gsutil cp "$SELECTED_FILE" "$GCS_BUCKET"
-
-        echo "Uploaded $SELECTED_FILE to $GCS_BUCKET"
+    if [ ${#SELECTED_FILES[@]} -gt 0 ]; then
+        # Use parallel/multi-threaded upload (-m)
+        echo "Starting parallel upload of ${#SELECTED_FILES[@]} files..."
+        gsutil -m cp "${SELECTED_FILES[@]}" "$GCS_BUCKET"
+        
+        # Print results with bullet points
+        echo -e "\nSuccessfully uploaded:"
+        printf '  • %s\n' "${SELECTED_FILES[@]}"
     else
         echo "No JPEG files found!"
     fi
 
-    # Wait for the user-defined interval
+    # Sleep for the specified interval
+    echo "Sleeping for $INTERVAL seconds..."
     sleep "$INTERVAL"
 done
