@@ -6,6 +6,7 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 import altair as alt
 import google.auth
+import plotly.express as px
 
 # ------------------------
 #  Load credentials
@@ -152,15 +153,32 @@ chart_data = (
     .reset_index(name="Count")
 )
 
-chart = alt.Chart(chart_data).mark_line(point=True).encode(
-    x=alt.X("Date:T", title="Date"),
-    y=alt.Y("Count:Q", title="Count"),
-    color="Result Label:N",
-    tooltip=["Date", "Result Label", "Count"]
-).properties(width="container", height=300)
+fig_trend = px.line(
+    chart_data,
+    x="Date",
+    y="Count",
+    color="Result Label",
+    markers=True,
+    labels={
+        "Date": "Date",
+        "Count": "Count",
+        "Result Label": "Result Type"
+    }
+)
 
-st.altair_chart(chart, use_container_width=True)
+fig_trend.update_traces(
+    mode="lines+markers",
+    marker=dict(size=6, symbol="circle", line=dict(width=1, color='black'))
+)
 
+fig_trend.update_layout(
+    title="Trend Over Time",
+    xaxis=dict(title="Date"),
+    yaxis=dict(title="Count"),
+    hovermode="x unified"
+)
+
+st.plotly_chart(fig_trend, use_container_width=True)
 
 st.markdown("###  Prediction Results List")
 with st.container():
