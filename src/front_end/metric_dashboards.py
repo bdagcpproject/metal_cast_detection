@@ -6,7 +6,7 @@ from datetime import datetime
 import google.auth
 import plotly.graph_objects as go
 
-st.title("📈 Metrics Dashboard")
+st.title("📈 Prediction Metrics Dashboard")
 
 # --- Setup BigQuery client ---
 credentials, project_id = google.auth.default()
@@ -19,7 +19,7 @@ end_date = st.sidebar.date_input("End Date", datetime.today())
 agg_type = st.sidebar.radio("Aggregation Level", ["Weekly", "Monthly"])
 
 # --- Helper: Fetch BigQuery Data ---
-@st.cache_data(ttl=3600)  # Cache for 1 hour
+@st.cache_data(ttl=3600, show_spinner=False)  # Cache for 1 hour
 def fetch_bq_data(query: str) -> pd.DataFrame:
     df = bq_client.query(query).to_dataframe()
     df["aggregation_start"] = pd.to_datetime(df["aggregation_start"])

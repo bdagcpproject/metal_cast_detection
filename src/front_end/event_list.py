@@ -3,7 +3,6 @@ from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 import pandas as pd
 from datetime import datetime, timezone, timedelta
 from google.cloud import bigquery
-from google.oauth2 import service_account
 import altair as alt
 import google.auth
 import plotly.express as px
@@ -17,7 +16,7 @@ bq_client = bigquery.Client(credentials=credentials, project=project_id)
 # ------------------------
 #  Fetch BigQuery data
 # ------------------------
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=600, show_spinner=False)
 def fetch_event_data():
     query = """
     SELECT 
@@ -40,7 +39,7 @@ def fetch_event_data():
 # ------------------------
 #  Outlier Insights
 # ------------------------
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=600, show_spinner=False)
 def fetch_outlier_insights():
     query = """
     WITH base AS (
@@ -83,6 +82,123 @@ def fetch_outlier_insights():
     """
     return bq_client.query(query).to_dataframe().iloc[0]
 
+@st.cache_data(ttl=600, show_spinner=False)
+def display_image(result_id, image_url):
+    if image_url and not image_url.startswith("http"):
+       image_url = f"https://storage.googleapis.com/metal_casting_images/{image_url.lstrip('/')}"
+    
+    st.markdown("### 🖼️ Selected Image")
+    if image_url:
+        with st.spinner("Loading image..."):
+            st.image(image_url, caption=f"Result ID: {result_id}", width=400)
+    else:
+        st.warning("⚠️ No image URL found for this record.")
+
+def display_comments(result_id):
+    # 💬 Existing Comments 
+    st.markdown("### 💬 Existing Comments")
+    try:
+        with st.spinner("Loading comments..."):
+            comments_query = """
+            SELECT comment_text, comment_datetime
+            FROM `cast-defect-detection.cast_defect_detection.comments`
+            WHERE result_id = @result_id
+            ORDER BY comment_datetime DESC
+            """
+            job_config = bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ScalarQueryParameter("result_id", "STRING", result_id)
+                ]
+            )
+            comments_df = bq_client.query(comments_query, job_config=job_config).to_dataframe()
+            if not comments_df.empty:
+                for _, row in comments_df.iterrows():
+                    st.markdown(f"""
+                        <div style="padding: 8px 12px; border-left: 4px solid #007BFF; margin-bottom: 10px; background-color: #f9f9f9;">
+                            <strong>{(row['comment_datetime'] + timedelta(hours=8)).strftime('%Y-%m-%d %H:%M:%S')}</strong><br>
+                            {row['comment_text']}
+                        </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.info("No comments yet for this result.")
+    except Exception as e:
+        st.error("Failed to load comments.")
+        st.text(str(e))
+
+@st.fragment
+def submit_comment(selected):
+    st.markdown("### 💬 Add a Comment")
+
+    # Submit comment
+    with st.form("comment_form", clear_on_submit=True):
+        comment = st.text_area("Your comment:", key="comment_box", height=100)
+        submitted = st.form_submit_button(
+            "Submit Comment",
+            disabled=st.session_state.get("button_disabled", False),
+            on_click=lambda: st.session_state.update({"button_disabled": True})
+        )
+
+        if submitted:
+            if not comment.strip():
+                st.warning("Please enter a comment before submitting.")
+                st.session_state.button_disabled = False
+            else:
+                try:
+                    timestamp = datetime.now(timezone.utc)
+                    insert_query = """
+                    INSERT INTO `cast-defect-detection.cast_defect_detection.comments`
+                    (result_id, comment_text, comment_datetime)
+                    VALUES (@result_id, @comment, @created_at)
+                    """
+                    insert_job = bigquery.QueryJobConfig(
+                        query_parameters=[
+                            bigquery.ScalarQueryParameter("result_id", "STRING", selected["Result ID"]),
+                            bigquery.ScalarQueryParameter("comment", "STRING", comment),
+                            bigquery.ScalarQueryParameter("created_at", "TIMESTAMP", timestamp),
+                        ]
+                    )
+                    bq_client.query(insert_query, job_config=insert_job).result()
+                    st.success("✅ Comment submitted successfully!")
+                    st.session_state.button_disabled = False
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error submitting comment: {e}")
+                    st.text(str(e))
+                    st.session_state.button_disabled = False
+
+@st.fragment
+def results_loading(filtered_events):
+    st.markdown("###  Prediction Results List")
+    with st.container():
+        gb = GridOptionsBuilder.from_dataframe(filtered_events)
+        gb.configure_selection('single', use_checkbox=True)
+        grid_options = gb.build()
+
+    grid_response = AgGrid(
+        filtered_events,
+        gridOptions=grid_options,
+        height=400,
+        theme="material",
+        fit_columns_on_grid_load=True,
+        allow_unsafe_jscode=True,
+        update_mode=GridUpdateMode.SELECTION_CHANGED,
+    )
+
+    selected_rows = grid_response.get("selected_rows", [])
+
+    if isinstance(selected_rows, pd.DataFrame):
+        selected_rows = selected_rows.to_dict(orient="records")
+
+    if isinstance(selected_rows, list) and len(selected_rows) > 0:
+        selected = selected_rows[0]
+        result_id = selected["Result ID"]
+
+        display_image(result_id, selected["image_url"])
+
+        display_comments(result_id)
+
+        submit_comment(selected)
+        
 # ------------------------
 # 🚀 Main UI
 # ------------------------
@@ -97,7 +213,6 @@ max_date = df_events["Date"].max().date()
 
 start_date = st.sidebar.date_input("Start Date", min_value=min_date, max_value=max_date, value=min_date)
 end_date = st.sidebar.date_input("End Date", min_value=min_date, max_value=max_date, value=max_date)
-
 
 mask = (df_events["Date"].dt.date >= start_date) & (df_events["Date"].dt.date <= end_date)
 filtered_events = df_events[mask].reset_index(drop=True).fillna("")
@@ -172,7 +287,6 @@ fig_trend.update_traces(
 )
 
 fig_trend.update_layout(
-    title="Trend Over Time",
     xaxis=dict(title="Date"),
     yaxis=dict(title="Count"),
     hovermode="x unified"
@@ -180,95 +294,4 @@ fig_trend.update_layout(
 
 st.plotly_chart(fig_trend, use_container_width=True)
 
-st.markdown("###  Prediction Results List")
-with st.container():
-    gb = GridOptionsBuilder.from_dataframe(filtered_events)
-    gb.configure_selection('single', use_checkbox=True)
-    grid_options = gb.build()
-
-    grid_response = AgGrid(
-        filtered_events,
-        gridOptions=grid_options,
-        height=400,
-        theme="material",
-        fit_columns_on_grid_load=True,
-        allow_unsafe_jscode=True,
-        update_mode=GridUpdateMode.SELECTION_CHANGED,
-    )
-
-# 💬 Image Preview + Comments
-selected_rows = grid_response.get("selected_rows", [])
-
-if isinstance(selected_rows, pd.DataFrame):
-    selected_rows = selected_rows.to_dict(orient="records")
-
-if isinstance(selected_rows, list) and len(selected_rows) > 0:
-    selected = selected_rows[0]
-    result_id = selected["Result ID"]
-
-    image_url = selected.get("image_url", "")
-    if image_url and not image_url.startswith("http"):
-        image_url = f"https://storage.googleapis.com/metal_casting_images/{image_url.lstrip('/')}"
-
-    st.markdown("### 🖼️ Selected Image")
-    if image_url:
-        st.image(image_url, caption=f"Result ID: {result_id}", width=400)
-    else:
-        st.warning("⚠️ No image URL found for this record.")
-
-    # 💬 Existing Comments
-    st.markdown("### 💬 Existing Comments")
-    try:
-        comments_query = """
-        SELECT comment_text, comment_datetime
-        FROM `cast-defect-detection.cast_defect_detection.comments`
-        WHERE result_id = @result_id
-        ORDER BY comment_datetime DESC
-        """
-        job_config = bigquery.QueryJobConfig(
-            query_parameters=[
-                bigquery.ScalarQueryParameter("result_id", "STRING", result_id)
-            ]
-        )
-        comments_df = bq_client.query(comments_query, job_config=job_config).to_dataframe()
-        if not comments_df.empty:
-            for _, row in comments_df.iterrows():
-                st.markdown(f"""
-                    <div style="padding: 8px 12px; border-left: 4px solid #007BFF; margin-bottom: 10px; background-color: #f9f9f9;">
-                        <strong>{row['comment_datetime'].strftime('%Y-%m-%d %H:%M:%S')}</strong><br>
-                        {row['comment_text']}
-                    </div>
-                """, unsafe_allow_html=True)
-        else:
-            st.info("No comments yet for this result.")
-    except Exception as e:
-        st.error("Failed to load comments.")
-        st.text(str(e))
-
-    st.markdown("### 💬 Add a Comment")
-    comment = st.text_area("Your comment:", key="comment_box", height=100)
-
-    # Submit comment
-    if st.button("Submit Comment"):
-        if not comment.strip():
-            st.warning("Please enter a comment before submitting.")
-        else:
-            try:
-                timestamp = datetime.now(timezone(timedelta(hours=8)))
-                insert_query = """
-                INSERT INTO `cast-defect-detection.cast_defect_detection.comments`
-                (result_id, comment_text, comment_datetime)
-                VALUES (@result_id, @comment, @created_at)
-                """
-                insert_job = bigquery.QueryJobConfig(
-                    query_parameters=[
-                        bigquery.ScalarQueryParameter("result_id", "STRING", selected["Result ID"]),
-                        bigquery.ScalarQueryParameter("comment", "STRING", comment),
-                        bigquery.ScalarQueryParameter("created_at", "TIMESTAMP", timestamp),
-                    ]
-                )
-                bq_client.query(insert_query, job_config=insert_job).result()
-                st.success("✅ Comment submitted successfully!")
-            except Exception as e:
-                st.error(f"❌ Error submitting comment: {e}")
-                st.text(str(e))
+results_loading(filtered_events)
